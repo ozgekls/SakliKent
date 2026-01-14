@@ -1,24 +1,83 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'add_mekan_page.dart';
+import 'login_page.dart';
 import 'models/mekan.dart';
 import 'services/mekan_service.dart';
-import 'add_mekan_page.dart';
 
 final supabase = Supabase.instance.client;
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
   @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  late final MekanService _service;
+  StreamSubscription<AuthState>? _authSub;
+
+  User? _user;
+
+  @override
+  void initState() {
+    super.initState();
+    _service = MekanService(supabase);
+
+    // İlk açılışta mevcut user'ı al
+    _user = supabase.auth.currentUser;
+
+    // Auth değişimlerini dinle (login/logout olunca ikon değişsin)
+    _authSub = supabase.auth.onAuthStateChange.listen((data) {
+      setState(() {
+        _user = data.session?.user;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final service = MekanService(supabase);
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Saklı Kent')),
+      appBar: AppBar(
+        title: const Text('Saklı Kent'),
+        actions: [
+          if (_user == null)
+            IconButton(
+              tooltip: 'Giriş Yap',
+              icon: const Icon(Icons.login),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                );
+              },
+            )
+          else
+            IconButton(
+              tooltip: 'Çıkış Yap',
+              icon: const Icon(Icons.logout),
+              onPressed: () async {
+                await supabase.auth.signOut();
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Çıkış yapıldı')));
+              },
+            ),
+        ],
+      ),
 
-      // 1) DB’yi dinliyoruz
       body: StreamBuilder<List<Mekan>>(
-        stream: service.streamMekanlar(),
+        stream: _service.streamMekanlar(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -37,7 +96,7 @@ class HomePage extends StatelessWidget {
           return ListView.separated(
             padding: const EdgeInsets.all(12),
             itemCount: mekanlar.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, i) {
               final m = mekanlar[i];
               return Card(
@@ -58,16 +117,25 @@ class HomePage extends StatelessWidget {
         },
       ),
 
-      // 2) Mekan ekleme butonu
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
-          // Butona basınca form sayfasına gidiyoruz
+          if (_user == null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Mekan eklemek için önce giriş yapmalısın.'),
+              ),
+            );
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const LoginPage()),
+            );
+            return;
+          }
+
           await Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const AddMekanPage()),
           );
-          // Geri dönünce ekstra bir şey yapmıyoruz,
-          // çünkü StreamBuilder zaten DB değişimini yakalayacak.
         },
         icon: const Icon(Icons.add),
         label: const Text('Mekan Ekle'),
