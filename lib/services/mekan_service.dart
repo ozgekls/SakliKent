@@ -30,11 +30,11 @@ class MekanService {
     }
 
     await client.from('mekan').insert({
-      'MekanAdi': mekanAdi,
-      'Sehir': sehir,
-      'Aciklama': aciklama,
-      'ButceSeviyesi': butceSeviyesi,
-      'EkleyenKullaniciID': user.id, // RLS CHECK burada geçecek
+      'mekanadi': mekanAdi,
+      'sehir': sehir,
+      'aciklama': aciklama,
+      'butceseviyesi': butceSeviyesi,
+      'ekleyenkullaniciid': user.id, // RLS CHECK burada geçecek
     });
   }
 }

@@ -136,6 +136,7 @@ class _HomePageState extends State<HomePage> {
             context,
             MaterialPageRoute(builder: (_) => const AddMekanPage()),
           );
+          if (mounted) setState(() {});
         },
         icon: const Icon(Icons.add),
         label: const Text('Mekan Ekle'),
