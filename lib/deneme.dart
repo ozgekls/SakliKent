@@ -2108,4 +2108,5 @@ class Comment {
     required this.hasVisited,
   });
 }
+
 */

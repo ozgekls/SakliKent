@@ -5,8 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'add_mekan_page.dart';
 import 'mekan_detay_page.dart';
 import 'login_page.dart';
-import 'models/mekan.dart';
-import 'services/mekan_service.dart';
+import '../models/mekan.dart';
+import '../services/mekan_service.dart';
 
 final supabase = Supabase.instance.client;
 

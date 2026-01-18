@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 //import 'package:saklikent/deneme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'home_page.dart';
+import 'pages/home_page.dart';
+import 'pages/main_shell_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,7 +26,7 @@ class SakliKentApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Saklı Kent',
       theme: ThemeData(useMaterial3: true),
-      home: const HomePage(),
+      home: const MainShellPage(),
     );
   }
 }
