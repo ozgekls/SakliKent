@@ -1,9 +1,13 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+
 import '../services/mekan_service.dart';
 
 final supabase = Supabase.instance.client;
@@ -21,8 +25,14 @@ class _AddMekanPageState extends State<AddMekanPage> {
   final _mekanAdiCtrl = TextEditingController();
   final _sehirCtrl = TextEditingController();
   final _aciklamaCtrl = TextEditingController();
-  int? _butce; // 1..5
 
+  // ✅ Konum (kullanıcı sadece adres metnini görür)
+  final _adresCtrl = TextEditingController();
+  double? _lat;
+  double? _lng;
+  bool _konumLoading = false;
+
+  int? _butce; // 1..5
   bool _saving = false;
 
   // ✅ Kapak foto (zorunlu)
@@ -65,6 +75,7 @@ class _AddMekanPageState extends State<AddMekanPage> {
     _mekanAdiCtrl.dispose();
     _sehirCtrl.dispose();
     _aciklamaCtrl.dispose();
+    _adresCtrl.dispose();
     super.dispose();
   }
 
@@ -83,6 +94,189 @@ class _AddMekanPageState extends State<AddMekanPage> {
     });
   }
 
+  // =========================
+  // ✅ KONUM: seçenek seçtir
+  // =========================
+  Future<void> _openKonumSecenekleri() async {
+    if (_saving) return;
+
+    await showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (_) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Konum Ekle',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 12),
+
+                ListTile(
+                  leading: const Icon(Icons.my_location),
+                  title: const Text('Otomatik (GPS)'),
+                  subtitle: const Text(
+                    'Konum izni ver → adres otomatik gelsin',
+                  ),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _setKonumFromGps();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.edit_location_alt),
+                  title: const Text('Manuel'),
+                  subtitle: const Text('Sadece adresi yaz (koordinat yok)'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _setKonumManual();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _setKonumFromGps() async {
+    setState(() => _konumLoading = true);
+
+    try {
+      // 1) Servis açık mı?
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw 'Konum servisi kapalı. Telefon/PC ayarlarından aç.';
+      }
+
+      // 2) İzin kontrol
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied) {
+        throw 'Konum izni verilmedi.';
+      }
+      if (permission == LocationPermission.deniedForever) {
+        throw 'Konum izni kalıcı olarak reddedilmiş. Ayarlardan izin ver.';
+      }
+
+      // 3) Konumu al
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      _lat = pos.latitude;
+      _lng = pos.longitude;
+
+      // (küçük gecikme: bazı durumlarda ardışık istekleri yumuşatır)
+      await Future.delayed(const Duration(milliseconds: 250));
+
+      // 4) Reverse geocode -> adres metni
+      final addr = await _reverseGeocodeNominatim(_lat!, _lng!);
+
+      setState(() {
+        _adresCtrl.text = addr;
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Konum eklendi ✅ (adres bulundu)')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Konum alınamadı: $e')));
+    } finally {
+      if (mounted) setState(() => _konumLoading = false);
+    }
+  }
+
+  // ✅ 403 için sağlam reverse geocode: önce Nominatim, olmazsa BigDataCloud fallback
+  Future<String> _reverseGeocodeNominatim(double lat, double lon) async {
+    // 1) Önce Nominatim dene
+    final nominatim = Uri.parse(
+      'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$lat&lon=$lon&zoom=18&addressdetails=1',
+    );
+
+    try {
+      final res = await http.get(
+        nominatim,
+        headers: const {
+          // Nominatim User-Agent ister (gerçek contact eklendi)
+          'User-Agent': 'SakliKent/1.0 (ozge.tcz4@gmail.com)',
+          'Accept': 'application/json',
+        },
+      );
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final displayName = (data['display_name'] ?? '').toString().trim();
+        if (displayName.isNotEmpty) return displayName;
+      }
+
+      // 403/429 vb. -> fallback'e düşeceğiz
+    } catch (_) {
+      // Nominatim patlarsa da fallback
+    }
+
+    // 2) Fallback: BigDataCloud (key istemez, çok stabil)
+    final bdc = Uri.parse(
+      'https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=$lat&longitude=$lon&localityLanguage=tr',
+    );
+
+    final res2 = await http.get(bdc);
+    if (res2.statusCode != 200) {
+      throw 'Adres servisi hata verdi (${res2.statusCode})';
+    }
+
+    final data2 = jsonDecode(res2.body) as Map<String, dynamic>;
+
+    final city = (data2['city'] ?? data2['principalSubdivision'] ?? '')
+        .toString()
+        .trim();
+    final district = (data2['locality'] ?? '').toString().trim();
+
+    // bazı cihazlarda locality boş gelebiliyor -> subdivision işe yarıyor
+    final subLocality = (data2['principalSubdivision'] ?? '').toString().trim();
+
+    final parts = <String>[
+      if (district.isNotEmpty) district,
+      if (subLocality.isNotEmpty && subLocality != city) subLocality,
+      if (city.isNotEmpty) city,
+    ];
+
+    final addr = parts.join(', ').trim();
+    return addr.isEmpty ? 'Adres bulunamadı' : addr;
+  }
+
+  void _setKonumManual() {
+    // Manuel seçince koordinatları sıfırla (kullanıcı koordinat görmüyor zaten)
+    setState(() {
+      _lat = null;
+      _lng = null;
+      // adres alanı kullanıcı yazacak (mevcut varsa kalsın)
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Adres alanına manuel yazabilirsin.')),
+    );
+  }
+
+  void _clearKonum() {
+    setState(() {
+      _adresCtrl.clear();
+      _lat = null;
+      _lng = null;
+    });
+  }
+
   Future<void> _save() async {
     // 1) Form valid mi?
     if (!(_formKey.currentState?.validate() ?? false)) return;
@@ -92,6 +286,14 @@ class _AddMekanPageState extends State<AddMekanPage> {
       setState(() => _kapakHata = 'Kapak fotoğrafı zorunludur');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Kapak fotoğrafı seçmelisin.')),
+      );
+      return;
+    }
+
+    // 1.2) Adres zorunlu (senin UX’te konum önemli)
+    if (_adresCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lütfen konum ekleyin (adres).')),
       );
       return;
     }
@@ -116,12 +318,10 @@ class _AddMekanPageState extends State<AddMekanPage> {
       final filePath =
           'mekan/${user.id}/${DateTime.now().microsecondsSinceEpoch}_$rand.$safeExt';
 
-      print("USER: ${supabase.auth.currentUser?.id}");
-
       await supabase.storage.from('images').upload(filePath, _kapakFoto!);
       final kapakUrl = supabase.storage.from('images').getPublicUrl(filePath);
 
-      // 3) Mekanı ekle -> id dönsün (kapak_fotograf_url NOT NULL olduğu için URL ile ekliyoruz)
+      // 3) Mekanı ekle -> id dönsün
       final inserted = await supabase
           .from('mekan')
           .insert({
@@ -135,6 +335,13 @@ class _AddMekanPageState extends State<AddMekanPage> {
             'butceseviyesi': _butce,
             'ekleyenkullaniciid': user.id,
             'kapak_fotograf_url': kapakUrl,
+
+            // ✅ KONUM ALANLARI
+            'adres': _adresCtrl.text.trim().isEmpty
+                ? null
+                : _adresCtrl.text.trim(),
+            'latitude': _lat,
+            'longitude': _lng,
           })
           .select('id')
           .single();
@@ -161,6 +368,8 @@ class _AddMekanPageState extends State<AddMekanPage> {
 
   @override
   Widget build(BuildContext context) {
+    final hasAdres = _adresCtrl.text.trim().isNotEmpty;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Mekan Ekle')),
       body: Padding(
@@ -247,6 +456,54 @@ class _AddMekanPageState extends State<AddMekanPage> {
                   border: OutlineInputBorder(),
                 ),
               ),
+
+              // =========================
+              // ✅ KONUM BLOĞU (AÇIKLAMADAN SONRA)
+              // =========================
+              const SizedBox(height: 12),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _konumLoading || _saving
+                          ? null
+                          : _openKonumSecenekleri,
+                      icon: _konumLoading
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.location_on_outlined),
+                      label: Text(
+                        _konumLoading ? 'Konum alınıyor...' : 'Konum Ekle',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton(
+                    tooltip: 'Konumu temizle',
+                    onPressed: (!hasAdres || _konumLoading || _saving)
+                        ? null
+                        : _clearKonum,
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 10),
+
+              TextFormField(
+                controller: _adresCtrl,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Adres (kullanıcı sadece bunu görür)',
+                  border: OutlineInputBorder(),
+                  hintText: 'Konum ekleyin veya manuel adres yazın',
+                ),
+              ),
+
               const SizedBox(height: 12),
 
               DropdownButtonFormField<int>(
