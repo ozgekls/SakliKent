@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+// ✅ Harita için
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 final supabase = Supabase.instance.client;
 
 class MekanDetayPage extends StatefulWidget {
@@ -26,6 +31,11 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
 
   // ✅ Kapak foto URL (mekan tablosundan)
   String? _kapakUrl;
+
+  // ✅ Konum bilgileri (mekan tablosundan)
+  String? _adres;
+  double? _lat;
+  double? _lng;
 
   @override
   void initState() {
@@ -58,16 +68,19 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
           .toSet()
           .toList();
 
-      // ✅ 1.1) Kapak foto URL (mekan tablosundan ayrı çek)
+      // ✅ 1.1) Mekan tablosundan kapak + konum çek
       final mekanRow = await supabase
           .from('mekan')
-          .select('kapak_fotograf_url')
+          .select('kapak_fotograf_url, adres, latitude, longitude')
           .eq('id', widget.mekanId)
           .maybeSingle();
 
       _kapakUrl = (mekanRow?['kapak_fotograf_url'] as String?);
+      _adres = (mekanRow?['adres'] as String?)?.toString();
+      _lat = (mekanRow?['latitude'] as num?)?.toDouble();
+      _lng = (mekanRow?['longitude'] as num?)?.toDouble();
 
-      // 2) Yorumlar + kullanıcı bilgisi (FK gerekli)
+      // 2) Yorumlar + kullanıcı bilgisi
       final yorumRows = await supabase
           .from('yorum')
           .select('''
@@ -270,6 +283,24 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
     await _loadAll();
   }
 
+  void _openMap() {
+    final lat = _lat;
+    final lng = _lng;
+    if (lat == null || lng == null) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MapPage(
+          mekanAdi: (_ozet?['mekanadi'] ?? 'Mekan').toString(),
+          lat: lat,
+          lng: lng,
+          adres: _adres,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final title = (_ozet?['mekanadi'] ?? 'Mekan Detay').toString();
@@ -335,6 +366,29 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
                       ),
                     ],
                   ),
+
+                  // ✅ Harita butonu (lat/lng varsa)
+                  const SizedBox(height: 10),
+                  if (_lat != null && _lng != null)
+                    SizedBox(
+                      height: 48,
+                      child: OutlinedButton.icon(
+                        onPressed: _openMap,
+                        icon: const Icon(Icons.map_outlined),
+                        label: const Text('Haritada Gör'),
+                      ),
+                    )
+                  else
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Text(
+                          'Bu mekanda harita için koordinat yok. (Manuel adres girilmiş olabilir)\n'
+                          'Adres: ${(_adres ?? '—')}',
+                          style: const TextStyle(color: Colors.black54),
+                        ),
+                      ),
+                    ),
 
                   const SizedBox(height: 12),
                   _buildKategoriCard(),
@@ -511,6 +565,80 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
         color: Colors.black.withOpacity(0.06),
       ),
       child: Text(text),
+    );
+  }
+}
+
+// =====================================
+// ✅ HARİTA SAYFASI (AYNI DOSYA İÇİNDE)
+// =====================================
+class MapPage extends StatelessWidget {
+  final String mekanAdi;
+  final double lat;
+  final double lng;
+  final String? adres;
+
+  const MapPage({
+    super.key,
+    required this.mekanAdi,
+    required this.lat,
+    required this.lng,
+    this.adres,
+  });
+
+  Future<void> _openInOSM() async {
+    final url = Uri.parse(
+      'https://www.openstreetmap.org/?mlat=$lat&mlon=$lng#map=18/$lat/$lng',
+    );
+    await launchUrl(url, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final center = LatLng(lat, lng);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(mekanAdi),
+        actions: [
+          IconButton(
+            tooltip: 'OpenStreetMap’te aç',
+            onPressed: _openInOSM,
+            icon: const Icon(Icons.open_in_new),
+          ),
+        ],
+      ),
+      body: FlutterMap(
+        options: MapOptions(initialCenter: center, initialZoom: 16),
+        children: [
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.example.saklikent',
+          ),
+          MarkerLayer(
+            markers: [
+              Marker(
+                point: center,
+                width: 54,
+                height: 54,
+                child: const Icon(Icons.location_pin, size: 54),
+              ),
+            ],
+          ),
+        ],
+      ),
+      bottomNavigationBar: (adres == null || adres!.trim().isEmpty)
+          ? null
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  adres!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
     );
   }
 }
