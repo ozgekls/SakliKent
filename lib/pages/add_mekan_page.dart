@@ -1,4 +1,8 @@
+import 'dart:io';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/mekan_service.dart';
 
@@ -20,6 +24,10 @@ class _AddMekanPageState extends State<AddMekanPage> {
   int? _butce; // 1..5
 
   bool _saving = false;
+
+  // ✅ Kapak foto (zorunlu)
+  File? _kapakFoto;
+  String? _kapakHata;
 
   // ✅ Kategori state
   List<Map<String, dynamic>> _kategoriler = [];
@@ -60,32 +68,86 @@ class _AddMekanPageState extends State<AddMekanPage> {
     super.dispose();
   }
 
+  Future<void> _pickKapakFoto() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+      maxWidth: 1600,
+    );
+
+    if (picked == null) return;
+    setState(() {
+      _kapakFoto = File(picked.path);
+      _kapakHata = null;
+    });
+  }
+
   Future<void> _save() async {
     // 1) Form valid mi?
     if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    // 1.1) Kapak foto zorunlu
+    if (_kapakFoto == null) {
+      setState(() => _kapakHata = 'Kapak fotoğrafı zorunludur');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kapak fotoğrafı seçmelisin.')),
+      );
+      return;
+    }
 
     setState(() => _saving = true);
 
     try {
       final service = MekanService(supabase);
 
-      // 2) Mekanı ekle -> id dönsün
-      final mekanId = await service.addMekanReturnId(
-        mekanAdi: _mekanAdiCtrl.text.trim(),
-        sehir: _sehirCtrl.text.trim().isEmpty ? null : _sehirCtrl.text.trim(),
-        aciklama: _aciklamaCtrl.text.trim().isEmpty
-            ? null
-            : _aciklamaCtrl.text.trim(),
-        butceSeviyesi: _butce,
-      );
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        throw 'Mekan eklemek için giriş yapmalısın.';
+      }
 
-      // 3) ✅ Seçili kategorileri ilişkilendir
+      // 2) Kapak foto storage upload (önce)
+      final rand = Random().nextInt(1 << 32);
+      final ext = (_kapakFoto!.path.split('.').last).toLowerCase();
+      final safeExt =
+          (ext == 'png' || ext == 'webp' || ext == 'jpg' || ext == 'jpeg')
+          ? ext
+          : 'jpg';
+      final filePath =
+          'mekan/${user.id}/${DateTime.now().microsecondsSinceEpoch}_$rand.$safeExt';
+
+      print("USER: ${supabase.auth.currentUser?.id}");
+
+      await supabase.storage.from('images').upload(filePath, _kapakFoto!);
+      final kapakUrl = supabase.storage.from('images').getPublicUrl(filePath);
+
+      // 3) Mekanı ekle -> id dönsün (kapak_fotograf_url NOT NULL olduğu için URL ile ekliyoruz)
+      final inserted = await supabase
+          .from('mekan')
+          .insert({
+            'mekanadi': _mekanAdiCtrl.text.trim(),
+            'sehir': _sehirCtrl.text.trim().isEmpty
+                ? null
+                : _sehirCtrl.text.trim(),
+            'aciklama': _aciklamaCtrl.text.trim().isEmpty
+                ? null
+                : _aciklamaCtrl.text.trim(),
+            'butceseviyesi': _butce,
+            'ekleyenkullaniciid': user.id,
+            'kapak_fotograf_url': kapakUrl,
+          })
+          .select('id')
+          .single();
+
+      final mekanId = inserted['id'] as String;
+
+      // 4) ✅ Seçili kategorileri ilişkilendir
       await service.addMekanKategoriler(
         mekanId: mekanId,
         kategoriIds: _seciliKategoriIds.toList(),
       );
 
-      // 4) Başarılıysa sayfayı kapat (HomePage setState ile günceller)
+      // 5) Başarılıysa sayfayı kapat
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
@@ -107,6 +169,53 @@ class _AddMekanPageState extends State<AddMekanPage> {
           key: _formKey,
           child: ListView(
             children: [
+              // ✅ Kapak foto (zorunlu)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Kapak Fotoğrafı *',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: _saving ? null : _pickKapakFoto,
+                    child: Container(
+                      height: 180,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: _kapakFoto == null
+                              ? Colors.redAccent
+                              : Colors.green,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: _kapakFoto == null
+                          ? const Center(
+                              child: Text('Fotoğraf seçmek için dokun'),
+                            )
+                          : ClipRRect(
+                              borderRadius: BorderRadius.circular(14),
+                              child: Image.file(_kapakFoto!, fit: BoxFit.cover),
+                            ),
+                    ),
+                  ),
+                  if (_kapakHata != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        _kapakHata!,
+                        style: const TextStyle(color: Colors.red, fontSize: 12),
+                      ),
+                    ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
               TextFormField(
                 controller: _mekanAdiCtrl,
                 decoration: const InputDecoration(
@@ -197,7 +306,7 @@ class _AddMekanPageState extends State<AddMekanPage> {
               SizedBox(
                 height: 48,
                 child: ElevatedButton.icon(
-                  onPressed: _saving ? null : _save,
+                  onPressed: (_saving || _kapakFoto == null) ? null : _save,
                   icon: _saving
                       ? const SizedBox(
                           width: 18,

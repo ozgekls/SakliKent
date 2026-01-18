@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 //import 'package:saklikent/deneme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'pages/home_page.dart';
+//import 'pages/home_page.dart';
 import 'pages/main_shell_page.dart';
 
 void main() async {

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'add_mekan_page.dart';
 import 'mekan_detay_page.dart';
 import 'login_page.dart';
+import 'profile_page.dart';
 import '../models/mekan.dart';
 import '../services/mekan_service.dart';
 
@@ -22,6 +23,7 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<AuthState>? _authSub;
 
   User? _user;
+  String? _profilePhotoUrl;
 
   @override
   void initState() {
@@ -30,13 +32,43 @@ class _HomePageState extends State<HomePage> {
 
     // İlk açılışta mevcut user'ı al
     _user = supabase.auth.currentUser;
+    if (_user != null) {
+      _loadCurrentUserProfilePhoto();
+    }
 
     // Auth değişimlerini dinle (login/logout olunca ikon değişsin)
     _authSub = supabase.auth.onAuthStateChange.listen((data) {
       setState(() {
         _user = data.session?.user;
       });
+
+      // kullanıcı değiştiyse profil foto url'ini çek
+      if (_user != null) {
+        _loadCurrentUserProfilePhoto();
+      } else {
+        setState(() => _profilePhotoUrl = null);
+      }
     });
+  }
+
+  Future<void> _loadCurrentUserProfilePhoto() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final row = await supabase
+          .from('kullanici')
+          .select('profil_fotograf_url')
+          .eq('kullaniciid', user.id)
+          .maybeSingle();
+
+      if (!mounted) return;
+      setState(() {
+        _profilePhotoUrl = (row?['profil_fotograf_url'] as String?);
+      });
+    } catch (_) {
+      // sessiz geç (RLS/row yoksa bile app çalışsın)
+    }
   }
 
   @override
@@ -62,7 +94,31 @@ class _HomePageState extends State<HomePage> {
                 );
               },
             )
-          else
+          else ...[
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ProfilePage(userId: _user!.id),
+                    ),
+                  ).then((_) => _loadCurrentUserProfilePhoto());
+                },
+                child: CircleAvatar(
+                  radius: 16,
+                  backgroundImage:
+                      (_profilePhotoUrl != null && _profilePhotoUrl!.isNotEmpty)
+                      ? NetworkImage(_profilePhotoUrl!)
+                      : null,
+                  child: (_profilePhotoUrl == null || _profilePhotoUrl!.isEmpty)
+                      ? const Icon(Icons.person, size: 18)
+                      : null,
+                ),
+              ),
+            ),
             IconButton(
               tooltip: 'Çıkış Yap',
               icon: const Icon(Icons.logout),
@@ -74,57 +130,78 @@ class _HomePageState extends State<HomePage> {
                 ).showSnackBar(const SnackBar(content: Text('Çıkış yapıldı')));
               },
             ),
+          ],
         ],
       ),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+          stream: supabase
+              .from('mekan')
+              .stream(primaryKey: ['id'])
+              .order('olusturmatarihi', ascending: false),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(child: Text('Hata: ${snapshot.error}'));
+            }
 
-      body: StreamBuilder<List<Mekan>>(
-        stream: _service.streamMekanlar(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text('Hata: ${snapshot.error}'));
-          }
+            final mekanlar = snapshot.data ?? [];
+            if (mekanlar.isEmpty) {
+              return const Center(child: Text('Henüz mekan yok. İlk mekanı ekle!'));
+            }
 
-          final mekanlar = snapshot.data ?? [];
-          if (mekanlar.isEmpty) {
-            return const Center(
-              child: Text('Henüz mekan yok. İlk mekanı ekle!'),
-            );
-          }
+            return ListView.separated(
+              padding: const EdgeInsets.all(12),
+              itemCount: mekanlar.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, i) {
+                final m = mekanlar[i];
+                final id = m['id'].toString();
+                final ad = (m['mekanadi'] ?? '').toString();
+                final sehir = (m['sehir'] ?? '').toString();
+                final aciklama = (m['aciklama'] ?? '').toString();
+                final butce = m['butceseviyesi'];
+                final kapakUrl = (m['kapak_fotograf_url'] ?? '').toString();
 
-          return ListView.separated(
-            padding: const EdgeInsets.all(12),
-            itemCount: mekanlar.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, i) {
-              final m = mekanlar[i];
-              return Card(
-                child: ListTile(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MekanDetayPage(mekanId: m.id),
-                      ),
-                    );
-                  },
-                  title: Text(m.mekanAdi),
-                  subtitle: Text(
-                    [
-                      if ((m.sehir ?? '').isNotEmpty) m.sehir!,
-                      if ((m.aciklama ?? '').isNotEmpty) m.aciklama!,
-                      if (m.butceSeviyesi != null)
-                        'Bütçe: ${m.butceSeviyesi}/5',
-                    ].join(' • '),
-                  ),
+                return Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: ListTile(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => MekanDetayPage(mekanId: id)),
+                      );
+                    },
+
+                    // ✅ FOTOĞRAF (solda thumbnail)
+                    leading: (kapakUrl.isNotEmpty)
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.network(
+                              kapakUrl,
+                              width: 56,
+                              height: 56,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => _fallbackThumb(),
+                            ),
+                          )
+                        : _fallbackThumb(),
+
+                title: Text(ad),
+                subtitle: Text(
+                  [
+                    if (sehir.isNotEmpty) sehir,
+                    if (aciklama.isNotEmpty) aciklama,
+                    if (butce != null) 'Bütçe: $butce/5',
+                  ].join(' • '),
                 ),
-              );
-            },
-          );
-        },
-      ),
+          ),
+        );
+      },
+    );
+  },
+),
 
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
@@ -152,4 +229,16 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+}
+
+Widget _fallbackThumb() {
+  return Container(
+    width: 56,
+    height: 56,
+    decoration: BoxDecoration(
+      color: Colors.black.withOpacity(0.06),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: const Icon(Icons.image_outlined),
+  );
 }
