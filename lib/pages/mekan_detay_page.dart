@@ -24,6 +24,9 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
   List<Map<String, dynamic>> _yorumlar = [];
   List<String> _kategoriler = [];
 
+  // ✅ Kapak foto URL (mekan tablosundan)
+  String? _kapakUrl;
+
   @override
   void initState() {
     super.initState();
@@ -54,6 +57,15 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
           .map((x) => x.toString())
           .toSet()
           .toList();
+
+      // ✅ 1.1) Kapak foto URL (mekan tablosundan ayrı çek)
+      final mekanRow = await supabase
+          .from('mekan')
+          .select('kapak_fotograf_url')
+          .eq('id', widget.mekanId)
+          .maybeSingle();
+
+      _kapakUrl = (mekanRow?['kapak_fotograf_url'] as String?);
 
       // 2) Yorumlar + kullanıcı bilgisi (FK gerekli)
       final yorumRows = await supabase
@@ -261,6 +273,7 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
   @override
   Widget build(BuildContext context) {
     final title = (_ozet?['mekanadi'] ?? 'Mekan Detay').toString();
+    final kapak = (_kapakUrl ?? '').trim();
 
     return Scaffold(
       appBar: AppBar(title: Text(title)),
@@ -273,6 +286,26 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  // ✅ Kapak foto (üstte banner)
+                  if (kapak.isNotEmpty) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.network(
+                        kapak,
+                        height: 220,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          height: 220,
+                          alignment: Alignment.center,
+                          color: Colors.black.withOpacity(0.06),
+                          child: const Icon(Icons.broken_image_outlined),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
                   _buildOzetCard(),
                   const SizedBox(height: 10),
 
@@ -307,7 +340,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
                   _buildKategoriCard(),
                   const SizedBox(height: 12),
 
-                  // ✅ Yorum yap paneli (visited şartı)
                   _buildYorumYazPanel(),
                   const SizedBox(height: 12),
 
