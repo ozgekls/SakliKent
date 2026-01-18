@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'services/mekan_service.dart';
+import '../services/mekan_service.dart';
 
 final supabase = Supabase.instance.client;
 
@@ -21,6 +21,37 @@ class _AddMekanPageState extends State<AddMekanPage> {
 
   bool _saving = false;
 
+  // ✅ Kategori state
+  List<Map<String, dynamic>> _kategoriler = [];
+  final Set<String> _seciliKategoriIds = {};
+  bool _katLoading = true;
+  String? _katError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadKategoriler();
+  }
+
+  Future<void> _loadKategoriler() async {
+    setState(() {
+      _katLoading = true;
+      _katError = null;
+    });
+
+    try {
+      final service = MekanService(supabase);
+      final cats = await service.getKategoriler();
+      setState(() {
+        _kategoriler = cats;
+      });
+    } catch (e) {
+      setState(() => _katError = e.toString());
+    } finally {
+      setState(() => _katLoading = false);
+    }
+  }
+
   @override
   void dispose() {
     _mekanAdiCtrl.dispose();
@@ -36,9 +67,10 @@ class _AddMekanPageState extends State<AddMekanPage> {
     setState(() => _saving = true);
 
     try {
-      // 2) DB insert
       final service = MekanService(supabase);
-      await service.addMekan(
+
+      // 2) Mekanı ekle -> id dönsün
+      final mekanId = await service.addMekanReturnId(
         mekanAdi: _mekanAdiCtrl.text.trim(),
         sehir: _sehirCtrl.text.trim().isEmpty ? null : _sehirCtrl.text.trim(),
         aciklama: _aciklamaCtrl.text.trim().isEmpty
@@ -47,8 +79,14 @@ class _AddMekanPageState extends State<AddMekanPage> {
         butceSeviyesi: _butce,
       );
 
-      // 3) Başarılıysa sayfayı kapat
-      if (mounted) Navigator.pop(context);
+      // 3) ✅ Seçili kategorileri ilişkilendir
+      await service.addMekanKategoriler(
+        mekanId: mekanId,
+        kategoriIds: _seciliKategoriIds.toList(),
+      );
+
+      // 4) Başarılıysa sayfayı kapat (HomePage setState ile günceller)
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -113,7 +151,48 @@ class _AddMekanPageState extends State<AddMekanPage> {
                     .toList(),
                 onChanged: (v) => setState(() => _butce = v),
               ),
+
               const SizedBox(height: 16),
+
+              // ✅ KATEGORİ SEÇİMİ
+              const Text(
+                'Kategoriler',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+
+              if (_katLoading)
+                const LinearProgressIndicator()
+              else if (_katError != null)
+                Text('Kategoriler yüklenemedi: $_katError')
+              else if (_kategoriler.isEmpty)
+                const Text('Kategori bulunamadı')
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _kategoriler.map((k) {
+                    final id = k['kategoriid'].toString();
+                    final ad = k['kategoriadi'].toString();
+                    final selected = _seciliKategoriIds.contains(id);
+
+                    return FilterChip(
+                      label: Text(ad),
+                      selected: selected,
+                      onSelected: (v) {
+                        setState(() {
+                          if (v) {
+                            _seciliKategoriIds.add(id);
+                          } else {
+                            _seciliKategoriIds.remove(id);
+                          }
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
+
+              const SizedBox(height: 18),
 
               SizedBox(
                 height: 48,
