@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'add_mekan_page.dart';
+import 'mekan_detay_page.dart';
 import 'login_page.dart';
 import 'models/mekan.dart';
 import 'services/mekan_service.dart';
@@ -101,6 +102,14 @@ class _HomePageState extends State<HomePage> {
               final m = mekanlar[i];
               return Card(
                 child: ListTile(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MekanDetayPage(mekanId: m.id),
+                      ),
+                    );
+                  },
                   title: Text(m.mekanAdi),
                   subtitle: Text(
                     [
