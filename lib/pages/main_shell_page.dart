@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'login_page.dart';
+import 'kesfet_page.dart';
 import 'home_page.dart'; // Mekanlar sayfan (liste)
 import 'profile_page.dart'; // Profil sayfan
 // import 'kesfet_page.dart';   // varsa ekle, yoksa placeholder kullanacağız
@@ -22,10 +24,9 @@ class _MainShellPageState extends State<MainShellPage> {
     final user = supabase.auth.currentUser;
 
     final pages = <Widget>[
-      const _KesfetPlaceholder(),
+      const KesfetPage(),
       const HomePage(),
-      // giriş yoksa bile profil açılabilir; içeride "giriş yap" gösterebilirsin
-      ProfilePage(userId: user?.id ?? ''), // user yoksa boş string
+      user == null ? const _LoginGate() : ProfilePage(userId: user.id),
     ];
 
     return Scaffold(
@@ -55,11 +56,36 @@ class _MainShellPageState extends State<MainShellPage> {
   }
 }
 
-class _KesfetPlaceholder extends StatelessWidget {
-  const _KesfetPlaceholder();
+class _LoginGate extends StatelessWidget {
+  const _LoginGate();
 
   @override
   Widget build(BuildContext context) {
-    return const Center(child: Text('Keşfet sayfası (sonra yapacağız)'));
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.lock_outline, size: 48),
+            const SizedBox(height: 12),
+            const Text(
+              'Profilini görmek için giriş yapmalısın',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                );
+              },
+              child: const Text('Giriş Yap'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

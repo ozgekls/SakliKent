@@ -45,10 +45,17 @@ class _AddMekanPageState extends State<AddMekanPage> {
   bool _katLoading = true;
   String? _katError;
 
+  // ✅ Etiket state (YENİ)
+  List<Map<String, dynamic>> _etiketler = [];
+  final Set<String> _seciliEtiketIds = {};
+  bool _etiketLoading = true;
+  String? _etiketError;
+
   @override
   void initState() {
     super.initState();
     _loadKategoriler();
+    _loadEtiketler(); // ✅ YENİ
   }
 
   Future<void> _loadKategoriler() async {
@@ -67,6 +74,29 @@ class _AddMekanPageState extends State<AddMekanPage> {
       setState(() => _katError = e.toString());
     } finally {
       setState(() => _katLoading = false);
+    }
+  }
+
+  // ✅ Etiketleri DB'den çek
+  Future<void> _loadEtiketler() async {
+    setState(() {
+      _etiketLoading = true;
+      _etiketError = null;
+    });
+
+    try {
+      final tags = await supabase
+          .from('etiket')
+          .select('etiketid,etiketadi')
+          .order('etiketadi');
+
+      setState(() {
+        _etiketler = List<Map<String, dynamic>>.from(tags);
+      });
+    } catch (e) {
+      setState(() => _etiketError = e.toString());
+    } finally {
+      setState(() => _etiketLoading = false);
     }
   }
 
@@ -115,7 +145,6 @@ class _AddMekanPageState extends State<AddMekanPage> {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 12),
-
                 ListTile(
                   leading: const Icon(Icons.my_location),
                   title: const Text('Otomatik (GPS)'),
@@ -148,13 +177,11 @@ class _AddMekanPageState extends State<AddMekanPage> {
     setState(() => _konumLoading = true);
 
     try {
-      // 1) Servis açık mı?
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        throw 'Konum servisi kapalı. Telefon/PC ayarlarından aç.';
+        throw 'Konum servisi kapalı. Ayarlardan aç.';
       }
 
-      // 2) İzin kontrol
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -163,10 +190,9 @@ class _AddMekanPageState extends State<AddMekanPage> {
         throw 'Konum izni verilmedi.';
       }
       if (permission == LocationPermission.deniedForever) {
-        throw 'Konum izni kalıcı olarak reddedilmiş. Ayarlardan izin ver.';
+        throw 'Konum izni kalıcı reddedilmiş. Ayarlardan izin ver.';
       }
 
-      // 3) Konumu al
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
@@ -174,12 +200,9 @@ class _AddMekanPageState extends State<AddMekanPage> {
       _lat = pos.latitude;
       _lng = pos.longitude;
 
-      // (küçük gecikme: bazı durumlarda ardışık istekleri yumuşatır)
       await Future.delayed(const Duration(milliseconds: 250));
 
-      // 4) Reverse geocode -> adres metni
       final addr = await _reverseGeocodeNominatim(_lat!, _lng!);
-
       setState(() {
         _adresCtrl.text = addr;
       });
@@ -198,9 +221,7 @@ class _AddMekanPageState extends State<AddMekanPage> {
     }
   }
 
-  // ✅ 403 için sağlam reverse geocode: önce Nominatim, olmazsa BigDataCloud fallback
   Future<String> _reverseGeocodeNominatim(double lat, double lon) async {
-    // 1) Önce Nominatim dene
     final nominatim = Uri.parse(
       'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$lat&lon=$lon&zoom=18&addressdetails=1',
     );
@@ -209,7 +230,6 @@ class _AddMekanPageState extends State<AddMekanPage> {
       final res = await http.get(
         nominatim,
         headers: const {
-          // Nominatim User-Agent ister (gerçek contact eklendi)
           'User-Agent': 'SakliKent/1.0 (ozge.tcz4@gmail.com)',
           'Accept': 'application/json',
         },
@@ -220,13 +240,8 @@ class _AddMekanPageState extends State<AddMekanPage> {
         final displayName = (data['display_name'] ?? '').toString().trim();
         if (displayName.isNotEmpty) return displayName;
       }
+    } catch (_) {}
 
-      // 403/429 vb. -> fallback'e düşeceğiz
-    } catch (_) {
-      // Nominatim patlarsa da fallback
-    }
-
-    // 2) Fallback: BigDataCloud (key istemez, çok stabil)
     final bdc = Uri.parse(
       'https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=$lat&longitude=$lon&localityLanguage=tr',
     );
@@ -242,8 +257,6 @@ class _AddMekanPageState extends State<AddMekanPage> {
         .toString()
         .trim();
     final district = (data2['locality'] ?? '').toString().trim();
-
-    // bazı cihazlarda locality boş gelebiliyor -> subdivision işe yarıyor
     final subLocality = (data2['principalSubdivision'] ?? '').toString().trim();
 
     final parts = <String>[
@@ -257,11 +270,9 @@ class _AddMekanPageState extends State<AddMekanPage> {
   }
 
   void _setKonumManual() {
-    // Manuel seçince koordinatları sıfırla (kullanıcı koordinat görmüyor zaten)
     setState(() {
       _lat = null;
       _lng = null;
-      // adres alanı kullanıcı yazacak (mevcut varsa kalsın)
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -278,10 +289,8 @@ class _AddMekanPageState extends State<AddMekanPage> {
   }
 
   Future<void> _save() async {
-    // 1) Form valid mi?
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    // 1.1) Kapak foto zorunlu
     if (_kapakFoto == null) {
       setState(() => _kapakHata = 'Kapak fotoğrafı zorunludur');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -290,7 +299,6 @@ class _AddMekanPageState extends State<AddMekanPage> {
       return;
     }
 
-    // 1.2) Adres zorunlu (senin UX’te konum önemli)
     if (_adresCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Lütfen konum ekleyin (adres).')),
@@ -302,13 +310,9 @@ class _AddMekanPageState extends State<AddMekanPage> {
 
     try {
       final service = MekanService(supabase);
-
       final user = supabase.auth.currentUser;
-      if (user == null) {
-        throw 'Mekan eklemek için giriş yapmalısın.';
-      }
+      if (user == null) throw 'Mekan eklemek için giriş yapmalısın.';
 
-      // 2) Kapak foto storage upload (önce)
       final rand = Random().nextInt(1 << 32);
       final ext = (_kapakFoto!.path.split('.').last).toLowerCase();
       final safeExt =
@@ -321,7 +325,6 @@ class _AddMekanPageState extends State<AddMekanPage> {
       await supabase.storage.from('images').upload(filePath, _kapakFoto!);
       final kapakUrl = supabase.storage.from('images').getPublicUrl(filePath);
 
-      // 3) Mekanı ekle -> id dönsün
       final inserted = await supabase
           .from('mekan')
           .insert({
@@ -335,8 +338,6 @@ class _AddMekanPageState extends State<AddMekanPage> {
             'butceseviyesi': _butce,
             'ekleyenkullaniciid': user.id,
             'kapak_fotograf_url': kapakUrl,
-
-            // ✅ KONUM ALANLARI
             'adres': _adresCtrl.text.trim().isEmpty
                 ? null
                 : _adresCtrl.text.trim(),
@@ -348,13 +349,23 @@ class _AddMekanPageState extends State<AddMekanPage> {
 
       final mekanId = inserted['id'] as String;
 
-      // 4) ✅ Seçili kategorileri ilişkilendir
+      // ✅ Kategoriler
       await service.addMekanKategoriler(
         mekanId: mekanId,
         kategoriIds: _seciliKategoriIds.toList(),
       );
 
-      // 5) Başarılıysa sayfayı kapat
+      // ✅ Etiketler (YENİ)
+      if (_seciliEtiketIds.isNotEmpty) {
+        await supabase
+            .from('mekanetiket')
+            .insert(
+              _seciliEtiketIds
+                  .map((eid) => {'mekanid': mekanId, 'etiketid': eid})
+                  .toList(),
+            );
+      }
+
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
@@ -378,7 +389,7 @@ class _AddMekanPageState extends State<AddMekanPage> {
           key: _formKey,
           child: ListView(
             children: [
-              // ✅ Kapak foto (zorunlu)
+              // Kapak
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -457,9 +468,6 @@ class _AddMekanPageState extends State<AddMekanPage> {
                 ),
               ),
 
-              // =========================
-              // ✅ KONUM BLOĞU (AÇIKLAMADAN SONRA)
-              // =========================
               const SizedBox(height: 12),
 
               Row(
@@ -520,13 +528,12 @@ class _AddMekanPageState extends State<AddMekanPage> {
 
               const SizedBox(height: 16),
 
-              // ✅ KATEGORİ SEÇİMİ
+              // ✅ KATEGORİLER
               const Text(
                 'Kategoriler',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
-
               if (_katLoading)
                 const LinearProgressIndicator()
               else if (_katError != null)
@@ -551,6 +558,45 @@ class _AddMekanPageState extends State<AddMekanPage> {
                             _seciliKategoriIds.add(id);
                           } else {
                             _seciliKategoriIds.remove(id);
+                          }
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
+
+              const SizedBox(height: 16),
+
+              // ✅ ETİKETLER (YENİ)
+              const Text(
+                'Etiketler',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              if (_etiketLoading)
+                const LinearProgressIndicator()
+              else if (_etiketError != null)
+                Text('Etiketler yüklenemedi: $_etiketError')
+              else if (_etiketler.isEmpty)
+                const Text('Etiket bulunamadı')
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _etiketler.map((t) {
+                    final id = t['etiketid'].toString();
+                    final ad = t['etiketadi'].toString();
+                    final selected = _seciliEtiketIds.contains(id);
+
+                    return FilterChip(
+                      label: Text(ad),
+                      selected: selected,
+                      onSelected: (v) {
+                        setState(() {
+                          if (v) {
+                            _seciliEtiketIds.add(id);
+                          } else {
+                            _seciliEtiketIds.remove(id);
                           }
                         });
                       },
