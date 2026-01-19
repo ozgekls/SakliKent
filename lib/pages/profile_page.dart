@@ -103,11 +103,18 @@ class _ProfilePageState extends State<ProfilePage> {
     });
 
     try {
+      //await: bu işlem bitene kadar bekle
+      //final userRow: gelen veriyi bu değişkene at
       final userRow = await supabase
-          .from('kullanici')
-          .select('kullaniciadi, email, profil_fotograf_url')
-          .eq('kullaniciid', uid)
-          .maybeSingle();
+          .from('kullanici') //kullanici tablosundan
+          .select(
+            'kullaniciadi, email, profil_fotograf_url',
+          ) //gerekli sütunları seçiyoruz
+          .eq(
+            'kullaniciid',
+            uid,
+          ) // where işelmini yapıyoruz yani uid == kullaniciid olanları alıyoruz
+          .maybeSingle(); //tek satır döndürüyor
 
       if (userRow == null) {
         throw 'Kullanıcı kaydı bulunamadı (kullanici tablosu).';

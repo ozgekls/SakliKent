@@ -6,7 +6,7 @@ import 'add_mekan_page.dart';
 import 'mekan_detay_page.dart';
 import 'login_page.dart';
 import 'profile_page.dart';
-import '../models/mekan.dart';
+//import '../models/mekan.dart';
 import '../services/mekan_service.dart';
 
 final supabase = Supabase.instance.client;
@@ -81,7 +81,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Saklı Kent'),
+        title: const Text('Saklı Kent🗺️ '),
         actions: [
           if (_user == null)
             IconButton(
@@ -134,74 +134,82 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-          stream: supabase
-              .from('mekan')
-              .stream(primaryKey: ['id'])
-              .order('olusturmatarihi', ascending: false),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return Center(child: Text('Hata: ${snapshot.error}'));
-            }
+        //stream sayesinde dinamik bir görünüm elde ediyoruz. mekan eklediğimizde direkt olarak sayfada görünme işlemini stream yapıyor.
+        stream: supabase
+            .from('mekan')
+            .stream(
+              primaryKey: ['id'],
+            ) //PK yı kontrol ederek neyin değişiştiğini anlıyor
+            .order('olusturmatarihi', ascending: false),
 
-            final mekanlar = snapshot.data ?? [];
-            if (mekanlar.isEmpty) {
-              return const Center(child: Text('Henüz mekan yok. İlk mekanı ekle!'));
-            }
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text('Hata: ${snapshot.error}'));
+          }
 
-            return ListView.separated(
-              padding: const EdgeInsets.all(12),
-              itemCount: mekanlar.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, i) {
-                final m = mekanlar[i];
-                final id = m['id'].toString();
-                final ad = (m['mekanadi'] ?? '').toString();
-                final sehir = (m['sehir'] ?? '').toString();
-                final aciklama = (m['aciklama'] ?? '').toString();
-                final butce = m['butceseviyesi'];
-                final kapakUrl = (m['kapak_fotograf_url'] ?? '').toString();
+          final mekanlar = snapshot.data ?? [];
+          if (mekanlar.isEmpty) {
+            return const Center(
+              child: Text('Henüz mekan yok. İlk mekanı ekle!'),
+            );
+          }
 
-                return Card(
-                  clipBehavior: Clip.antiAlias,
-                  child: ListTile(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => MekanDetayPage(mekanId: id)),
-                      );
-                    },
+          return ListView.separated(
+            padding: const EdgeInsets.all(12),
+            itemCount: mekanlar.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, i) {
+              final m = mekanlar[i];
+              final id = m['id'].toString();
+              final ad = (m['mekanadi'] ?? '').toString();
+              final sehir = (m['sehir'] ?? '').toString();
+              final aciklama = (m['aciklama'] ?? '').toString();
+              final butce = m['butceseviyesi'];
+              final kapakUrl = (m['kapak_fotograf_url'] ?? '').toString();
 
-                    // ✅ FOTOĞRAF (solda thumbnail)
-                    leading: (kapakUrl.isNotEmpty)
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: Image.network(
-                              kapakUrl,
-                              width: 56,
-                              height: 56,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => _fallbackThumb(),
-                            ),
-                          )
-                        : _fallbackThumb(),
+              return Card(
+                clipBehavior: Clip.antiAlias,
+                child: ListTile(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MekanDetayPage(mekanId: id),
+                      ),
+                    );
+                  },
 
-                title: Text(ad),
-                subtitle: Text(
-                  [
-                    if (sehir.isNotEmpty) sehir,
-                    if (aciklama.isNotEmpty) aciklama,
-                    if (butce != null) 'Bütçe: $butce/5',
-                  ].join(' • '),
+                  // ✅ FOTOĞRAF (solda thumbnail)
+                  leading: (kapakUrl.isNotEmpty)
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.network(
+                            kapakUrl,
+                            width: 56,
+                            height: 56,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _fallbackThumb(),
+                          ),
+                        )
+                      : _fallbackThumb(),
+
+                  title: Text(ad),
+                  subtitle: Text(
+                    [
+                      if (sehir.isNotEmpty) sehir,
+                      if (aciklama.isNotEmpty) aciklama,
+                      if (butce != null) 'Bütçe: $butce/5',
+                    ].join(' • '),
+                  ),
                 ),
-          ),
-        );
-      },
-    );
-  },
-),
+              );
+            },
+          );
+        },
+      ),
 
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
