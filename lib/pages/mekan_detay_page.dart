@@ -629,6 +629,9 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
 
   Future<void> _openEditMekan() async {
     // seçenekleri çek (hata olsa bile dialog açılsın)
+    debugPrint('ME=${supabase.auth.currentUser?.id}');
+    debugPrint('OWNER=$_ownerId');
+
     try {
       await _loadKategoriEtiketOptions();
     } catch (_) {}
@@ -823,7 +826,7 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
           .from('mekankategori')
           .delete()
           .eq('mekanid', widget.mekanId);
-      await supabase.from('mekanetiket').delete().eq('mekanid', widget.mekanId);
+      // await supabase.from('mekanetiket').delete().eq('mekanid', widget.mekanId);
 
       if (seciliKat.isNotEmpty) {
         await supabase
@@ -835,14 +838,33 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
             );
       }
 
-      if (seciliEtiket.isNotEmpty) {
+      // ✅ ETİKETLER: çakışma olursa hata verme + eski seçilmemişleri temizle
+      final etiketList = seciliEtiket.toList();
+
+      // 1) Seçili olanları upsert et (duplicate key hatasını bitirir)
+      if (etiketList.isNotEmpty) {
         await supabase
             .from('mekanetiket')
-            .insert(
-              seciliEtiket
+            .upsert(
+              etiketList
                   .map((eid) => {'mekanid': widget.mekanId, 'etiketid': eid})
                   .toList(),
+              onConflict: 'mekanid,etiketid',
             );
+
+        // 2) Seçili OLMAYANLARI sil (DB’de eski kalanlar temizlensin)
+        final inStr = '(${etiketList.map((e) => '"$e"').join(",")})';
+        await supabase
+            .from('mekanetiket')
+            .delete()
+            .eq('mekanid', widget.mekanId)
+            .not('etiketid', 'in', inStr);
+      } else {
+        // seçili hiç etiket yoksa -> hepsini sil
+        await supabase
+            .from('mekanetiket')
+            .delete()
+            .eq('mekanid', widget.mekanId);
       }
 
       await _loadAll();
