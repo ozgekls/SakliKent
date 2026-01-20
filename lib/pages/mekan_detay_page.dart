@@ -22,25 +22,22 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
   bool _loading = true;
   String? _error;
 
-  // ✅ Kullanıcı aksiyonları (visited/like)
+  // ✅ Kullanıcı aksiyonları (visited/like/saved)
   bool _visited = false;
   bool _liked = false;
+  bool _saved = false; // YENİ: Kaydedilenler listesi
   bool _actionsLoading = false;
 
-  Map<String, dynamic>? _ozet; // view’den gelecek
+  Map<String, dynamic>? _ozet;
   List<Map<String, dynamic>> _yorumlar = [];
   List<String> _kategoriler = [];
 
-  // ✅ Kapak foto URL (mekan tablosundan)
   String? _kapakUrl;
-
-  // ✅ Konum bilgileri (mekan tablosundan)
   String? _adres;
   double? _lat;
   double? _lng;
   String? _ownerId;
 
-  // ✅ Düzenleme popup’ı için tüm seçenekler
   List<Map<String, dynamic>> _kategoriOptions = [];
   List<Map<String, dynamic>> _etiketOptions = [];
 
@@ -49,12 +46,10 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
     return myId != null && _ownerId != null && myId == _ownerId;
   }
 
-  // ✅ Yorum özellikleri (beğeni + yanıt)
-  final Set<String> _expandedYorumlar = {}; // yorumid
-  final Map<String, List<Map<String, dynamic>>> _yanitCache =
-      {}; // yorumid -> replies
-  final Set<String> _replyLoading = {}; // yorumid loading
-  final Set<String> _likeLoading = {}; // yorumid loading
+  final Set<String> _expandedYorumlar = {};
+  final Map<String, List<Map<String, dynamic>>> _yanitCache = {};
+  final Set<String> _replyLoading = {};
+  final Set<String> _likeLoading = {};
 
   void _openUserProfile(String userId) {
     if (userId.isEmpty) return;
@@ -77,7 +72,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
     });
 
     try {
-      // 1) ÖZET + kategori (view)
       final rows = await supabase
           .from('v_mekanfiltreli')
           .select()
@@ -95,7 +89,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
           .toSet()
           .toList();
 
-      // 1.1) Mekan tablosundan kapak + konum çek
       final mekanRow = await supabase
           .from('mekan')
           .select(
@@ -110,7 +103,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
       _lat = (mekanRow?['latitude'] as num?)?.toDouble();
       _lng = (mekanRow?['longitude'] as num?)?.toDouble();
 
-      // 2) Yorumlar + kullanıcı bilgisi + yorum beğeni/yanıt sayıları
       final yorumRows = await supabase
           .from('v_yorumlar_detay_v2')
           .select('''
@@ -131,10 +123,8 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
 
       _yorumlar = (yorumRows as List).cast<Map<String, dynamic>>();
 
-      // 3) Bu kullanıcı visited/liked mi?
       await _loadUserActions();
 
-      // 4) Expanded açık olan yorumların yanıtlarını tekrar çek (refresh)
       for (final yorumId in _expandedYorumlar) {
         await _fetchReplies(yorumId, force: true);
       }
@@ -151,6 +141,7 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
       setState(() {
         _visited = false;
         _liked = false;
+        _saved = false;
       });
       return;
     }
@@ -169,10 +160,19 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
         .eq('kullaniciid', user.id)
         .maybeSingle();
 
+    // ✅ YENİ: Kaydedilenler kontrolü
+    final s = await supabase
+        .from('kaydedilenler')
+        .select('mekanid')
+        .eq('mekanid', widget.mekanId)
+        .eq('kullaniciid', user.id)
+        .maybeSingle();
+
     if (!mounted) return;
     setState(() {
       _visited = v != null;
       _liked = l != null;
+      _saved = s != null; // YENİ
     });
   }
 
@@ -205,6 +205,7 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
         if (mounted) setState(() => _visited = true);
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('İşlem başarısız: $e')));
@@ -244,6 +245,7 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
 
       await _loadAll();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('İşlem başarısız: $e')));
@@ -252,9 +254,63 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
     }
   }
 
-  // ============================
-  // ✅ Yorum Beğeni Toggle
-  // ============================
+  // ✅ YENİ: Kaydedilenler toggle
+  Future<void> _toggleSaved() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kaydetmek için giriş yapmalısın')),
+      );
+      return;
+    }
+
+    setState(() => _actionsLoading = true);
+
+    try {
+      if (_saved) {
+        // Listeden çıkar
+        await supabase
+            .from('kaydedilenler')
+            .delete()
+            .eq('mekanid', widget.mekanId)
+            .eq('kullaniciid', user.id);
+
+        if (mounted) {
+          setState(() => _saved = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Listeden çıkarıldı'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        // Listeye ekle
+        await supabase.from('kaydedilenler').insert({
+          'mekanid': widget.mekanId,
+          'kullaniciid': user.id,
+        });
+
+        if (mounted) {
+          setState(() => _saved = true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Gitmek istediklerim listesine eklendi ✅'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('İşlem başarısız: $e')));
+    } finally {
+      if (mounted) setState(() => _actionsLoading = false);
+    }
+  }
+
   Future<void> _toggleYorumBegeni(String yorumId, bool currentlyLiked) async {
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -283,6 +339,7 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
 
       await _loadAll();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('İşlem başarısız: $e')));
@@ -291,9 +348,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
     }
   }
 
-  // ============================
-  // ✅ Yanıtlar: Fetch + Toggle UI
-  // ============================
   Future<void> _fetchReplies(String yorumId, {bool force = false}) async {
     if (!force && _yanitCache.containsKey(yorumId)) return;
     if (_replyLoading.contains(yorumId)) return;
@@ -332,9 +386,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
     await _fetchReplies(yorumId);
   }
 
-  // ============================
-  // ✅ Yanıt ekleme
-  // ============================
   Future<void> _replyToComment(String yorumId) async {
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -591,9 +642,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
     }
   }
 
-  // ==========================================================
-  // ✅ DÜZENLEME: kategori+etiket seçeneklerini DB’den çek
-  // ==========================================================
   Future<void> _loadKategoriEtiketOptions() async {
     final cats = await supabase
         .from('kategori')
@@ -628,10 +676,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
   }
 
   Future<void> _openEditMekan() async {
-    // seçenekleri çek (hata olsa bile dialog açılsın)
-    debugPrint('ME=${supabase.auth.currentUser?.id}');
-    debugPrint('OWNER=$_ownerId');
-
     try {
       await _loadKategoriEtiketOptions();
     } catch (_) {}
@@ -670,7 +714,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Kapak
                   Row(
                     children: [
                       ClipRRect(
@@ -808,7 +851,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
     if (ok != true) return;
 
     try {
-      // 1) Mekan update
       final payload = <String, dynamic>{
         'mekanadi': nameCtrl.text.trim(),
         'aciklama': descCtrl.text.trim(),
@@ -821,12 +863,11 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
 
       await supabase.from('mekan').update(payload).eq('id', widget.mekanId);
 
-      // 2) ilişkiler: sil -> yeniden ekle
       await supabase
           .from('mekankategori')
           .delete()
           .eq('mekanid', widget.mekanId);
-      // await supabase.from('mekanetiket').delete().eq('mekanid', widget.mekanId);
+      await supabase.from('mekanetiket').delete().eq('mekanid', widget.mekanId);
 
       if (seciliKat.isNotEmpty) {
         await supabase
@@ -838,33 +879,14 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
             );
       }
 
-      // ✅ ETİKETLER: çakışma olursa hata verme + eski seçilmemişleri temizle
-      final etiketList = seciliEtiket.toList();
-
-      // 1) Seçili olanları upsert et (duplicate key hatasını bitirir)
-      if (etiketList.isNotEmpty) {
+      if (seciliEtiket.isNotEmpty) {
         await supabase
             .from('mekanetiket')
-            .upsert(
-              etiketList
+            .insert(
+              seciliEtiket
                   .map((eid) => {'mekanid': widget.mekanId, 'etiketid': eid})
                   .toList(),
-              onConflict: 'mekanid,etiketid',
             );
-
-        // 2) Seçili OLMAYANLARI sil (DB’de eski kalanlar temizlensin)
-        final inStr = '(${etiketList.map((e) => '"$e"').join(",")})';
-        await supabase
-            .from('mekanetiket')
-            .delete()
-            .eq('mekanid', widget.mekanId)
-            .not('etiketid', 'in', inStr);
-      } else {
-        // seçili hiç etiket yoksa -> hepsini sil
-        await supabase
-            .from('mekanetiket')
-            .delete()
-            .eq('mekanid', widget.mekanId);
       }
 
       await _loadAll();
@@ -953,6 +975,7 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
                   _buildOzetCard(),
                   const SizedBox(height: 10),
 
+                  // ✅ GÜNCELLENMIŞ: 3 buton (Visited, Like, Save)
                   Row(
                     children: [
                       Expanded(
@@ -963,10 +986,17 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
                                 ? Icons.check_circle
                                 : Icons.place_outlined,
                           ),
-                          label: Text(_visited ? 'Ziyaret Edildi' : 'Visited'),
+                          label: Text(
+                            _visited ? 'Ziyaret Edildi' : 'Ziyaret Et',
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _visited
+                                ? Colors.green.shade50
+                                : null,
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: ElevatedButton.icon(
                           onPressed: _actionsLoading ? null : _toggleLike,
@@ -974,6 +1004,24 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
                             _liked ? Icons.favorite : Icons.favorite_border,
                           ),
                           label: Text(_liked ? 'Beğenildi' : 'Beğen'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _liked ? Colors.red.shade50 : null,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _actionsLoading ? null : _toggleSaved,
+                          icon: Icon(
+                            _saved ? Icons.bookmark : Icons.bookmark_border,
+                          ),
+                          label: Text(_saved ? 'Kaydedildi' : 'Kaydet'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _saved
+                                ? Colors.orange.shade50
+                                : null,
+                          ),
                         ),
                       ),
                     ],
@@ -1055,7 +1103,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
     final begeni = (_ozet?['begeni_sayisi'] ?? 0).toString();
     final yorumSayisi = (_ozet?['yorum_sayisi'] ?? 0).toString();
 
-    // ✅ view'lerde bazen genel_ortalama bazen ortalama_puan olabiliyor
     final ortVal = _ozet?['genel_ortalama'] ?? _ozet?['ortalama_puan'] ?? 0;
     final ort = (ortVal is num) ? ortVal.toStringAsFixed(1) : ortVal.toString();
 
@@ -1464,9 +1511,6 @@ class _MekanDetayPageState extends State<MekanDetayPage> {
   }
 }
 
-// =====================================
-// ✅ HARİTA SAYFASI (AYNI DOSYA İÇİNDE)
-// =====================================
 class MapPage extends StatelessWidget {
   final String mekanAdi;
   final double lat;
@@ -1497,7 +1541,7 @@ class MapPage extends StatelessWidget {
         title: Text(mekanAdi),
         actions: [
           IconButton(
-            tooltip: 'OpenStreetMap’te aç',
+            tooltip: 'OpenStreetMap\'te aç',
             onPressed: _openInOSM,
             icon: const Icon(Icons.open_in_new),
           ),
