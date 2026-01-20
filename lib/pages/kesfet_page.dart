@@ -33,7 +33,7 @@ class _KesfetPageState extends State<KesfetPage> {
   String? searchText;
   int? butce; // 1..5
 
-  // ✅ Yeni filtre state (db’den gelecek)
+  // ✅ Yeni filtre state (db'den gelecek)
   List<Map<String, dynamic>> kategoriOptions = [];
   List<Map<String, dynamic>> etiketOptions = [];
 
@@ -151,22 +151,8 @@ class _KesfetPageState extends State<KesfetPage> {
       return q.order('olusturmatarihi', ascending: false);
     }
 
-    // popular
-    if (row2Selected == 'Lezzet') {
-      return q.order('lezzet_ort', ascending: false);
-    } else if (row2Selected == 'Hizmet') {
-      return q.order('hizmet_ort', ascending: false);
-    } else if (row2Selected == 'Estetik') {
-      return q.order('estetik_ort', ascending: false);
-    } else if (row2Selected == 'İnternet') {
-      return q.order('internet_ort', ascending: false);
-    } else if (row2Selected == 'Sessizlik') {
-      return q.order('sessizlik_ort', ascending: false);
-    } else if (row2Selected == 'Çalışmalık') {
-      return q.order('calismalik_ort', ascending: false);
-    } else if (row2Selected == 'Manzara') {
-      return q.order('manzara_ort', ascending: false);
-    } else if (row2Selected == 'Bütçe') {
+    // popular - sadece temel sıralamalar
+    if (row2Selected == 'Bütçe') {
       return q.order('butceseviyesi', ascending: true);
     }
 
@@ -397,21 +383,30 @@ class _KesfetPageState extends State<KesfetPage> {
             const SizedBox(height: 8),
           ],
 
-          // Trend / Sıralama chipleri (senin row2)
+          // ✅ Özellik filtreleri (Yöresel Yemek, Park Yeri, Aile Mekanı)
+          _BooleanFiltersRow(
+            yoreselOnly: yoreselOnly,
+            parkOnly: parkOnly,
+            aileOnly: aileOnly,
+            onYoreselToggle: () {
+              setState(() => yoreselOnly = !yoreselOnly);
+              _fetch();
+            },
+            onParkToggle: () {
+              setState(() => parkOnly = !parkOnly);
+              _fetch();
+            },
+            onAileToggle: () {
+              setState(() => aileOnly = !aileOnly);
+              _fetch();
+            },
+          ),
+
+          const SizedBox(height: 8),
+
+          // Trend / Sıralama chipleri
           FilterChipsRow(
-            items: const [
-              'Tümü',
-              'En Çok Beğeni',
-              'En Çok Yorum',
-              'Lezzet',
-              'Hizmet',
-              'Estetik',
-              'İnternet',
-              'Sessizlik',
-              'Çalışmalık',
-              'Manzara',
-              'Bütçe',
-            ],
+            items: const ['Tümü', 'En Çok Beğeni', 'En Çok Yorum', 'Bütçe'],
             selected: row2Selected,
             onSelected: _applyRow2Selection,
           ),
@@ -455,6 +450,106 @@ class _KesfetPageState extends State<KesfetPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ✅ YENİ WIDGET: Boolean Filtreler
+class _BooleanFiltersRow extends StatelessWidget {
+  final bool yoreselOnly;
+  final bool parkOnly;
+  final bool aileOnly;
+  final VoidCallback onYoreselToggle;
+  final VoidCallback onParkToggle;
+  final VoidCallback onAileToggle;
+
+  const _BooleanFiltersRow({
+    required this.yoreselOnly,
+    required this.parkOnly,
+    required this.aileOnly,
+    required this.onYoreselToggle,
+    required this.onParkToggle,
+    required this.onAileToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Text(
+            'Özellikler',
+            style: TextStyle(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 42,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              FilterChip(
+                label: const Text('🍽️ Yöresel Yemek'),
+                selected: yoreselOnly,
+                onSelected: (_) => onYoreselToggle(),
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: yoreselOnly ? cs.onPrimary : null,
+                ),
+                selectedColor: cs.primary,
+                backgroundColor: cs.surface,
+                shape: StadiumBorder(
+                  side: BorderSide(
+                    color: yoreselOnly ? cs.primary : cs.outlineVariant,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              FilterChip(
+                label: const Text('🅿️ Park Yeri'),
+                selected: parkOnly,
+                onSelected: (_) => onParkToggle(),
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: parkOnly ? cs.onPrimary : null,
+                ),
+                selectedColor: cs.primary,
+                backgroundColor: cs.surface,
+                shape: StadiumBorder(
+                  side: BorderSide(
+                    color: parkOnly ? cs.primary : cs.outlineVariant,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              FilterChip(
+                label: const Text('👨‍👩‍👧‍👦 Aile Mekanı'),
+                selected: aileOnly,
+                onSelected: (_) => onAileToggle(),
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: aileOnly ? cs.onPrimary : null,
+                ),
+                selectedColor: cs.primary,
+                backgroundColor: cs.surface,
+                shape: StadiumBorder(
+                  side: BorderSide(
+                    color: aileOnly ? cs.primary : cs.outlineVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
