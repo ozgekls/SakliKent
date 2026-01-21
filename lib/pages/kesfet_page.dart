@@ -406,11 +406,10 @@ class _KesfetPageState extends State<KesfetPage> {
 
           // Trend / Sıralama chipleri
           FilterChipsRow(
-            items: const ['Tümü', 'En Çok Beğeni', 'En Çok Yorum', 'Bütçe'],
+            items: const ['Tümü'],
             selected: row2Selected,
             onSelected: _applyRow2Selection,
           ),
-
           const SizedBox(height: 10),
 
           Expanded(
