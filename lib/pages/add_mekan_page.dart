@@ -355,7 +355,7 @@ class _AddMekanPageState extends State<AddMekanPage> {
         kategoriIds: _seciliKategoriIds.toList(),
       );
 
-      // ✅ Etiketler (YENİ)
+      // ✅ Etiketler
       if (_seciliEtiketIds.isNotEmpty) {
         await supabase
             .from('mekanetiket')
@@ -364,6 +364,17 @@ class _AddMekanPageState extends State<AddMekanPage> {
                   .map((eid) => {'mekanid': mekanId, 'etiketid': eid})
                   .toList(),
             );
+      }
+
+      // ✅ YENİ: Mekan ekleyen kişiyi otomatik ziyaretçi yap
+      try {
+        await supabase.from('ziyaretler').insert({
+          'mekanid': mekanId,
+          'kullaniciid': user.id,
+        });
+      } catch (_) {
+        // Zaten ziyaret kaydı varsa veya hata olursa sessiz geç
+        // (unique constraint ihlali olabilir)
       }
 
       if (mounted) Navigator.pop(context, true);
@@ -567,7 +578,7 @@ class _AddMekanPageState extends State<AddMekanPage> {
 
               const SizedBox(height: 16),
 
-              // ✅ ETİKETLER (YENİ)
+              // ✅ ETİKETLER
               const Text(
                 'Etiketler',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
